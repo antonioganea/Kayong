@@ -1,390 +1,301 @@
+/*	Author : Antonio Alexandru Ganea
+	July 2017, Binary Melody Editor for the Kayong Robotic Flute Project
+*/
+
 #include <ncurses.h>
 #include <string.h>
 #include <vector>
 #include <fstream>
 
-//TODO : use Unsigned Int insteat of int ( duration + notes )
-
-char noteNames[][4]={
-"OFF",
-"C 1",
-"CS1",
-"D 1",
-"DS1",
-"E 1",
-"F 1",
-"FS1",
-"G 1",
-"GS1",
-"A 2",
-"AS2",
-"B 2",
-"C 2",
-"CS2",
-"D 2",
-"DS2",
-"E 2",
-"F 2",
-"FS2",
-"G 2",
-"GS2",
-"A 3",
-"AS3",
-"B 3",
-"C 3",
-"CS3",
-"D 3",
-"DS3"
-};
-
-#define NOTE_NAMES_COUNT 29
-
-const unsigned char noteValues[] =
-{
-  0b00000000, // AIR OFF
-  0b11111111, // C1
-  0b11111110, // CSharp1
-  0b11111110, // D1
-  0b11111100, // DSharp1
-  0b11111100, // E1
-  0b11111011, // F1
-  0b11111010, // FSharp1
-  0b11110000, // G1
-  0b11101110, // GSharp1
-  0b11100000, // A2
-  0b11011010, // ASharp2
-  0b11000000, // B2
-  0b10100000, // C2
-  0b01100000, // CSharp2
-  0b00100000, // D2
-  0b00111110, // DSharp2
-  //"E2",
-  //"F2",
-  //"FS2",
-  //"G2",
-  //"GS2",
-  //"A3",
-  //"AS3",
-  //"B3",
-  //"C3",
-  //"CS3",
-  //"D3",
-  //"DS3"
-};
-
-#define NOTE_VALUES_COUNT 17
-
-unsigned int getNoteFromConfiguration( unsigned char config ){
-	for ( int i = 0; i < NOTE_VALUES_COUNT; i++ ){
-		if ( noteValues[i] == config )
-			return i;
-	}
-	return 0;
-}
-
-
-
-unsigned int WIDTH, HEIGHT;
-unsigned int ENTRIES_PER_PAGE;
-
-unsigned int currentPage;
-unsigned int currentRow;
-unsigned int currentColumn;
-
-unsigned int TOTAL_DURATION = 0;
-
-//int entryCount;
+#include "Notes.h"
 
 WINDOW * stats;
 WINDOW * editor;
+
+unsigned int WIDTH, HEIGHT; // Terminal Width and Height in cells
+unsigned int ENTRIES_PER_PAGE; // Number of notes per page
+
+unsigned int TOTAL_DURATION = 0; // Total song duration in miliseconds
+const int DURATION_STEP = 100; // The change applied to a note's duration when certain keys are pressed
+
+unsigned int currentPage;
+unsigned int currentRow;
 
 struct Entry{
 	unsigned char notes;
 	unsigned int duration;
 };
-
-//Entry entries[1024];
-
-unsigned int min( unsigned int a, unsigned int b ){
-	if ( a < b )
-		return a;
-	else
-		return b;
-}
-
 std::vector<Entry*> entries;
 
+/** Decomposes a byte into bits and draws them onscreen */
 void drawBits( unsigned int entry ){
 	unsigned char config = noteValues[ entries.at(entry)->notes ];
 	for ( int i = 7; i >= 0; i-- ){
-		//if ( ( entries[entry].notes >> i ) & 1 )
 		waddch( editor, '0' + ( ( config >> i ) & 1 ) );
 	}
 }
 
+/** Draws a specific entry on a specific row */
 void drawEntry( unsigned int row, unsigned int entry ){
 	if ( entry >= entries.size() )
 		return;
 
-	if ( row == currentRow )
+	if ( row == currentRow ) // Highlight currentRow
 		wattron(editor,COLOR_PAIR(2) | A_BOLD );
 
 	wmove(editor,row+1,1);
-	wprintw(editor, "%-*d", 8, entry );
+	wprintw(editor, "%-*d", 8, entry ); // Write entry number
 
-	waddstr(editor," | ");
-	wprintw(editor, "%s", noteNames[entries.at(entry)->notes] );
+	waddstr(editor," | "); // Spacing
+	wprintw(editor, "%s", noteNames[entries.at(entry)->notes] ); // Write note name
 
-	waddstr(editor," | ");
-	drawBits( entry );
+	waddstr(editor," | "); // Spacing
+	drawBits( entry ); // Write note configuration
 
-	waddstr(editor," | ");
-	wprintw(editor,"%*d",8,entries.at(entry)->duration);
+	waddstr(editor," | "); // Spacing
+	wprintw(editor,"%*d",8,entries.at(entry)->duration); // Write note duration
 
 	wattrset(editor,A_NORMAL);
 }
 
+/** Removes a specific entry from the song */
 void deleteEntry( unsigned int entry ){
 	TOTAL_DURATION -= entries.at(entry)->duration;
 	delete entries.at(entry);
 	entries.erase ( entries.begin()+entry );
 }
 
+/** Updates editor view */
 void drawPage(){
 	wclear(editor);
-	box(editor,0,0);
+	box(editor,0,0); // Draw border
 
-	for ( int i = 0; i < ENTRIES_PER_PAGE; i++ )
+	for ( unsigned int i = 0; i < ENTRIES_PER_PAGE; i++ ) // For each entry ..
 		drawEntry(i,i + ENTRIES_PER_PAGE * currentPage );
 
+	//Draw page number in bottom right corner
 	mvwprintw( editor, HEIGHT-4, WIDTH-13, " Page : %*d ", 3, currentPage );
-
-	wrefresh(editor);
+	wrefresh(editor); // Push buffer to screen
 }
 
-char filePath[256];
+char filePath[256]; // Stores the current file's path
 
+/** Updates stats view */
 void drawStats(){
-	box(stats, 0, 0);
+	box(stats, 0, 0); // Draw border
 
-	mvwaddstr(stats,0,(WIDTH-strlen(filePath))/2,filePath);
+	wattron( stats, COLOR_PAIR(3) ); // Set color pair 3
+	mvwaddstr(stats,0,(WIDTH-strlen(filePath))/2,filePath); // Draw title ( filename )
+	wattrset( stats, A_NORMAL);
 
-	wattron(stats,COLOR_PAIR(2));
+	wattron(stats,COLOR_PAIR(1)); // Set color pair 1
 	mvwaddstr(stats,1,1,"File Statistics : ");
 	wattrset(stats,A_NORMAL);
 
+	//Draw song statistics
 	wprintw(stats,"%*d notes, %*d miliseconds", 8, entries.size(), 8, TOTAL_DURATION );
-
-	wrefresh(stats);
+	wrefresh(stats); // Push buffer to screen
 }
 
-char * memblock;
-
+/** Loads the file into memory and parses the data, adding entries to the vector */
 void loadFromFile( char * fullPath ){
-	strcpy( filePath, fullPath );
-    std::streampos size;
-    std::ifstream file ( fullPath, std::ios::in|std::ios::binary|std::ios::ate );
+	strcpy( filePath, fullPath ); // Store the filename for future use ( saving )
+	char * memblock; // Pointer to the reader buffer
+    std::streampos size; // Used for reading
+    std::ifstream file ( fullPath, std::ios::in|std::ios::binary|std::ios::ate ); // Open file in binary reading mode
     if (file.is_open())
     {
-        size = file.tellg();
-        memblock = new char[size];
-        file.seekg (0, std::ios::beg);
-        file.read (memblock, size);
-        file.close();
+        size = file.tellg(); // Count filesize in bytes
+        memblock = new char[size]; // Allocate buffer size accordingly
+        file.seekg (0, std::ios::beg); // Reposition reading cursor to 0
+        file.read (memblock, size); // Read 'size' bytes into the buffer
+        file.close(); // Dealocate file structure memory
 
-        printf( "The entire melody file content is in memory ( %d bytes ).\n", (int)size );
+		//Following variables are used for reading
+        unsigned int n_notes, duration; // n_notes = number of notes, duration = specific note duration
+        unsigned char notes; // = byte handling specific note configuration ( holes )
 
-        unsigned int n_notes;
-        unsigned char notes;
-        unsigned int duration;
-        memcpy(&n_notes,memblock,4);
-        unsigned int pos;
+        memcpy(&n_notes,memblock,4); // Read number of notes from the file header
 
-        for ( pos = 0; pos < n_notes; pos++ ){
-			memcpy( &notes, memblock+4+pos*5, 1 );
-			memcpy( &duration, memblock+5+pos*5, 4 );
+        for ( unsigned int pos = 0; pos < n_notes; pos++ ){ // For each note in the file
+			memcpy( &notes, memblock+4+pos*5, 1 ); // Read configuration
+			memcpy( &duration, memblock+5+pos*5, 4 ); // Read duration
 
+			// Create new entry and push it in the vector
 			Entry * newEntry = new Entry;
 			newEntry->notes = getNoteFromConfiguration( notes );
 			newEntry->duration = duration;
 			TOTAL_DURATION += duration;
 			entries.push_back(newEntry);
         }
-
-
-
-        drawStats();
-    }
-    else{
-        puts( "Unable to open melody file!");
     }
 }
 
+/** Saves the song to the same file path it was loaded from */
 void saveMelody(){
-	FILE * fout;
-	fout = fopen( filePath, "wb" );
+	FILE * fout; // File output pointer
+	fout = fopen( filePath, "wb" ); // Open file in binary writing mode
 	int size = entries.size();
-	fwrite( &size, sizeof(int), 1, fout );
-	for( std::vector<Entry*>::iterator it = entries.begin(); it != entries.end(); it++ ){
-		fwrite( &(noteValues[(*it)->notes]), sizeof(char), 1, fout );
-		fwrite( &((*it)->duration), sizeof(int), 1, fout );
+	fwrite( &size, sizeof(int), 1, fout ); // Write file header ( note number )
+	for( std::vector<Entry*>::iterator it = entries.begin(); it != entries.end(); it++ ){ // For every note
+		fwrite( &(noteValues[(*it)->notes]), sizeof(char), 1, fout ); // Write configuration ..
+		fwrite( &((*it)->duration), sizeof(int), 1, fout ); // .. and duration
 	}
-	mvwaddstr(editor,HEIGHT-4,1,"FILE SAVED");
+	mvwaddstr(editor,HEIGHT-4,1,"FILE SAVED"); // Display a message in the bottom left corner
 	wrefresh(editor);
 
 	fclose(fout);
 }
 
-int DURATION_STEP = 100;
-
+/** Usage : melody-editor <filename> */
 int main(int argc, char *argv[])
 {
-/*
-	local_win = newwin(height, width, starty, startx);
-	box(local_win, 0 , 0);
-	wrefresh(local_win);
+	initscr(); // Start curses mode
+	start_color(); // Initialize color mode
+	noecho(); // Turn of echoing
+	curs_set(0); // Hide Curosr
+	cbreak(); // Line buffering disabled
+	keypad(stdscr, true); // Enable special keys ( for up and down arrow keys )
 
-	wborder(local_win, ' ', ' ', ' ',' ',' ',' ',' ',' ');
-*/
+	WIDTH = getmaxx(stdscr); // Screen width
+	HEIGHT = getmaxy(stdscr); // Screen height
+
+	ENTRIES_PER_PAGE = HEIGHT - 5; // Number of notes per page
 
 
-	initscr();			/* Start curses mode 		*/
-	start_color();
-	noecho();
-	curs_set(0);
-	cbreak();			/* Line buffering disabled, Pass on
-					 * everty thing to me 		*/
-	keypad(stdscr, true);		/* I need that nifty F1 	*/
-
-	WIDTH = getmaxx(stdscr);
-	HEIGHT = getmaxy(stdscr);
-
-	ENTRIES_PER_PAGE = HEIGHT - 5;
-
-	//deleteEntry(0);
-	//entryCount = 10;
-
+	// Define some color sets
 	init_pair(1, COLOR_CYAN, COLOR_BLACK );
 	init_pair(2, COLOR_YELLOW, COLOR_BLACK );
 	init_pair(3, COLOR_GREEN, COLOR_BLACK );
 
-	//printw("HELLO");
-	refresh();
+	refresh(); // Refresh the window for the first time so drawing is enabled correctly
 
-	stats = newwin( 3,WIDTH, 0, 0 );
-	drawStats();
+	stats = newwin( 3,WIDTH, 0, 0 ); // Init stats window ( upper part )
+	//drawStats();
 
-	editor = newwin( HEIGHT-3, WIDTH, 3, 0 );
+	editor = newwin( HEIGHT-3, WIDTH, 3, 0 ); // Init editor window ( lower part )
 
-	if ( argc == 2 )
+	// The first command-line argument should be the file name
+	if ( argc == 2 ){
+		// Load the file into the Entries vector and update screen
 		loadFromFile( argv[1] );
+		drawStats();
+		drawPage();
+	}
 	else{
-		endwin();
-		printf("ERROR : cannot open file! Usage : editor <filename>\n");
-		return 404;
+		endwin(); // Exit curses mode
+		printf("ERROR : cannot open file! Usage : melody-editor <filename>\n");
+		return 404; // File not found.
 	}
 
-	drawPage();
-
-	int ch;
-	while((ch = getch()) != 27)
-	{	switch(ch)
-		{	case KEY_LEFT:
-				//destroy_win(my_win);
-				//my_win = create_newwin(height, width, starty,--startx);
-				break;
-			case KEY_RIGHT:
-				//destroy_win(my_win);
-				//my_win = create_newwin(height, width, starty,++startx);
-				break;
-			case KEY_UP:
-				if ( currentRow > 0 ){
+	int ch; // Reader character
+	while((ch = getch()) != 27) // 27 = ESCAPE
+	{
+		unsigned int currentEntry = currentPage*ENTRIES_PER_PAGE+currentRow;
+		switch(ch){
+			case KEY_UP: // Try to switch currentRow to the upper row
+				if ( currentRow > 0 )
 					currentRow--;
-				}
 				else{
 					if ( currentPage > 0 ){
-					currentRow = ENTRIES_PER_PAGE-1;
-					currentPage--;
+					currentPage--; // Switch to the previous page
+					currentRow = ENTRIES_PER_PAGE-1; // Update row position
 					}
 				}
-				drawPage();
+				drawPage(); // Update editor view
 				break;
-			case KEY_DOWN:
-				if ( currentRow + ENTRIES_PER_PAGE*currentPage < entries.size()-1 ){
-					if ( currentRow < ENTRIES_PER_PAGE-1 )
+			case KEY_DOWN: // Try to switch currentRow to next row
+				if ( currentRow + ENTRIES_PER_PAGE*currentPage < entries.size()-1 ){ // Prevent overflow
+					if ( currentRow < ENTRIES_PER_PAGE-1 ) // Stay in the same page
 						currentRow++;
-					else{
+					else{ // Switch to previous page
 						currentPage++;
 						currentRow=0;
 					}
 				}
 				drawPage();
 				break;
-			case 'c':
+			case 'c': // Switch to previous page
 				if ( currentPage > 0 )
 					currentPage--;
 				drawPage();
 				break;
-			case 'v':
-				if ( currentPage < entries.size()/ENTRIES_PER_PAGE ){
+			case 'v': // Switch to next page
+				if ( currentPage < entries.size()/ENTRIES_PER_PAGE ){ // Prevent page overflow
 					currentPage++;
-					currentRow = min( ( entries.size()-1 )%ENTRIES_PER_PAGE, currentRow );
+					currentRow = ( ( entries.size()-1 ) % ENTRIES_PER_PAGE < currentRow ) ? ( entries.size()-1 ) % ENTRIES_PER_PAGE : currentRow; // Prevent currentRow overflow
 					drawPage();
 				}
 				break;
-			case 'a':{
-				int init = entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->duration;
-				entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->duration -= DURATION_STEP;
-				if ( entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->duration < 0 )
-					entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->duration = 0;
-				TOTAL_DURATION -= init - entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->duration;
+			case 'a':{ // Decrement current entry duration
+				Entry * entry = entries.at(currentEntry);
+				if ( entry->duration >= DURATION_STEP ){ // Prevent underflow
+					entry->duration -= DURATION_STEP;
+					TOTAL_DURATION -= DURATION_STEP;
+				}
+				else{
+					TOTAL_DURATION -= entry->duration;
+					entry->duration = 0;
+				}
+
+				// Update screen
 				drawStats();
-				drawPage(); // TODO : DRAW ENTRY INSTEAD OF PAGE
+				drawEntry( currentRow, currentEntry ); // Update row
+				wrefresh( editor ); // Push buffer to console;
 				break;
 				}
-			case 's':
-				entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->duration += DURATION_STEP;
-				TOTAL_DURATION+=DURATION_STEP;
+			case 's': // Increment current entry duration
+				entries.at(currentEntry)->duration += DURATION_STEP;
+				TOTAL_DURATION += DURATION_STEP;
+				// Update screen
 				drawStats();
-				drawPage(); // TODO : DRAW ENTRY INSTEAD OF PAGE
+				drawEntry( currentRow, currentEntry ); // Update row
+				wrefresh( editor ); // Push buffer to console;
 				break;
-			case 'n':{
+			case 'n':{ // Create new entry
 				Entry * newEntry = new Entry;
 				newEntry->notes = 0;
 				newEntry->duration = 0;
-				//TOTAL_DURATION += duration;
-				int pos = currentPage*ENTRIES_PER_PAGE+currentRow+1;
-				if ( pos > entries.size() )
+				unsigned int pos = currentEntry+1; // Calculate position ( immediately after the currently selected entry )
+				if ( pos > entries.size() ) // Prevent overflow
 					pos = entries.size();
-				entries.insert( entries.begin() + ( pos ) , newEntry);
+				entries.insert( entries.begin() + pos , newEntry); // Add entry to the list
+				// Update screen
 				drawPage();
 				drawStats();
 				break;
 				}
-			case 'd':
-				deleteEntry( currentPage*ENTRIES_PER_PAGE+currentRow );
+			case 'd': // Delete current entry
+				deleteEntry( currentEntry );
+				// Update screen
 				drawStats();
 				drawPage();
 				break;
-			case 'x'://increment note
-				entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->notes++;
-				if ( entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->notes >= NOTE_VALUES_COUNT )
-					entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->notes = 0;
-				drawPage();// TOOD : DRAW ENTRY INSTEAD OF PAGE
+			case 'x':{ // Increment note
+				Entry * entry = entries.at(currentEntry);
+				if ( ++entry->notes >= NOTE_VALUES_COUNT )
+					entry->notes = 0;
+				drawEntry( currentRow, currentEntry ); // Update row
+				wrefresh( editor ); // Push buffer to console;
 				break;
-			case 'z'://increment note
-				entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->notes--;
-				if ( entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->notes < 0 )
-					entries.at(currentPage*ENTRIES_PER_PAGE+currentRow)->notes = NOTE_VALUES_COUNT-1;
-				drawPage();// TOOD : DRAW ENTRY INSTEAD OF PAGE
+				}
+			case 'z':{ // Increment note
+				Entry * entry = entries.at(currentEntry);
+				if ( entry->notes == 0 )
+					entry->notes = NOTE_VALUES_COUNT-1;
+				else
+					entry->notes--;
+				drawEntry( currentRow, currentEntry ); // Update row
+				wrefresh( editor ); // Push buffer to console;
 				break;
-			case 'o':
+				}
+			case 'o': // Save song to file
                 saveMelody();
                 break;
 		}
 	}
-	delwin(stats);
-	delwin(editor);
-	endwin();			/* End curses mode		  */
+	delwin(stats); // Dealocate memory for the stats window
+	delwin(editor); // Dealocate memory for the editor window
+	endwin(); // End curses mode
 	return 0;
 }
