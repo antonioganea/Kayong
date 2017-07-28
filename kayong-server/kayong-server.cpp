@@ -1,6 +1,7 @@
 /*	Author : Antonio Alexandru Ganea
 	July 2017, Server for the Kayong Robotic Flute Project
 */
+#include "player.h"
 #include <SFML/Network.hpp>
 #include <stdio.h>
 using namespace std;
@@ -24,6 +25,8 @@ int main(){
 	}
 	printf("Listener was bound to port %d !\n", LISTENER_PORT );
 
+	initPlayer(); // Initialize player module ( for note output )
+
 	while ( true )
 	{
 		puts("Awaiting connection...\n");
@@ -39,6 +42,9 @@ int main(){
 				switch( status ){
 					case sf::Socket::Done:
 						printf( "Received a message : %lu bytes!\n", received );
+						data[received] = 0;//null character
+						setSong(data);
+						client.setBlocking(false);
 						break;
 					case sf::Socket::Disconnected:
 						puts( "Socket Disconected!");
@@ -47,7 +53,11 @@ int main(){
 					default:
 						break;
 				}
+				if ( !playSong() ){
+					client.setBlocking(true);
+				}
 			}
+			client.setBlocking(true);
 		}
 	}
 
